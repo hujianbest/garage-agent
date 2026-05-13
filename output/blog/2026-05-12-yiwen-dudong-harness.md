@@ -5,7 +5,9 @@ tags: [AI, Harness Engineering, Coding Agent, 软件工程]
 draft: true
 ---
 
-26 年开年之后，我对 AI Coding 的感觉变得很拧巴。
+前两天，我认真读了参考资料里的三篇文章。
+
+读完以后，我对 AI Coding 的感觉变得更拧巴了。
 
 一边是真的爽。
 
