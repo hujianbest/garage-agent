@@ -45,6 +45,14 @@ EXEMPTION_LIST: frozenset[str] = frozenset(
         "packs/README.md",
         "packs/garage/README.md",
         "packs/coding/README.md",
+        # code-audit pack README is necessarily host-aware: its "How to Use"
+        # section walks downstream users through OpenCode / Claude Code /
+        # Cursor invocation patterns (the pack's core value prop is two-agent
+        # confirmation orchestrated through native host agent surfaces), so it
+        # references `.opencode/agent/`, `.claude/agents/`, `.cursor/skills/`
+        # as install paths and host-specific invocation examples. Same精神 as
+        # the existing pack-level README entries above.
+        "packs/code-audit/README.md",
     }
 )
 
