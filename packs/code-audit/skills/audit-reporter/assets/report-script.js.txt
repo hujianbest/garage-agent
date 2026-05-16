@@ -1,0 +1,62 @@
+(function () {
+  function getActiveFilters(name) {
+    var inputs = document.querySelectorAll('input[data-filter="' + name + '"]:checked');
+    var out = [];
+    for (var i = 0; i < inputs.length; i++) { out.push(inputs[i].value); }
+    return out;
+  }
+
+  function applyFilters() {
+    var sev = getActiveFilters('severity');
+    var cat = getActiveFilters('category');
+    var conf = getActiveFilters('confidence');
+    var mod = getActiveFilters('module');
+    var vs = getActiveFilters('verifier-status');
+    var findings = document.querySelectorAll('article.finding');
+    var visible = 0;
+    for (var i = 0; i < findings.length; i++) {
+      var f = findings[i];
+      var ok = (sev.length === 0 || sev.indexOf(f.dataset.severity) !== -1)
+            && (cat.length === 0 || cat.indexOf(f.dataset.category) !== -1)
+            && (conf.length === 0 || conf.indexOf(f.dataset.confidence) !== -1)
+            && (mod.length === 0 || mod.indexOf(f.dataset.module) !== -1)
+            && (vs.length === 0 || vs.indexOf(f.dataset.verifierStatus) !== -1);
+      f.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    }
+    var counter = document.getElementById('visible-count');
+    if (counter) counter.textContent = visible;
+    var empty = document.getElementById('empty-state');
+    if (empty) empty.style.display = visible === 0 ? '' : 'none';
+  }
+
+  function selectAll(name, checked) {
+    var inputs = document.querySelectorAll('input[data-filter="' + name + '"]');
+    for (var i = 0; i < inputs.length; i++) { inputs[i].checked = checked; }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var inputs = document.querySelectorAll('input[type="checkbox"][data-filter]');
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i].addEventListener('change', applyFilters);
+    }
+    var selectAllBtn = document.getElementById('btn-select-all');
+    if (selectAllBtn) selectAllBtn.addEventListener('click', function () {
+      ['severity', 'category', 'confidence', 'module', 'verifier-status'].forEach(function (n) { selectAll(n, true); });
+      applyFilters();
+    });
+    var clearAllBtn = document.getElementById('btn-clear-all');
+    if (clearAllBtn) clearAllBtn.addEventListener('click', function () {
+      ['severity', 'category', 'confidence', 'module', 'verifier-status'].forEach(function (n) { selectAll(n, false); });
+      applyFilters();
+    });
+    var copyButtons = document.querySelectorAll('.btn-copy-location');
+    for (var j = 0; j < copyButtons.length; j++) {
+      copyButtons[j].addEventListener('click', function (e) {
+        var loc = e.target.getAttribute('data-loc');
+        if (navigator.clipboard) navigator.clipboard.writeText(loc);
+      });
+    }
+    applyFilters();
+  });
+})();
