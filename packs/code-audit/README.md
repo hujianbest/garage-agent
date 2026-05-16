@@ -114,18 +114,197 @@
 └── audit-log.jsonl                 # 全程审计流水
 ```
 
-## 触发方式
+## 如何使用
+
+### 第 1 步：把 pack 装到你的宿主
+
+在你要审查的项目根目录跑一次 `garage init`：
 
 ```bash
-# 一审 + 二审 + 报告（推荐）
-garage run code-audit-reviewer-agent --target src/
-garage run code-audit-verifier-agent  --run-id <id> --formats html,xlsx
+# 装到当前项目（project scope，跟项目走，进 git）
+garage init --hosts opencode             # 仅 OpenCode
+garage init --hosts claude               # 仅 Claude Code
+garage init --hosts opencode,claude      # 同时装两家
+garage init --hosts all                  # 三家全装（含 Cursor，但 Cursor 无 agent surface，见下）
 
-# 也可以在 IDE 内对话式触发：
-# "请审查 src/runtime/ 模块的 bug"
+# 装到用户家目录（user scope，跨项目复用，不入项目 git）
+garage init --hosts opencode --scope user
 ```
 
-第一版不引入 `garage audit` 一等公民 CLI（避开既有 contract surface），全部走 `garage run <agent>` 既有路径。
+落盘位置：
+
+| Host | 安装位置（project scope） | 是否支持 agent surface |
+|---|---|---|
+| OpenCode | `.opencode/skills/audit-*/SKILL.md` + `.opencode/agent/code-audit-*-agent.md` | ✅ 装到 `.opencode/agent/` |
+| Claude Code | `.claude/skills/audit-*/SKILL.md` + `.claude/agents/code-audit-*-agent.md` | ✅ 装到 `.claude/agents/` |
+| Cursor | `.cursor/skills/audit-*/SKILL.md` | ❌ Cursor 无 agent surface，agent 文件不装；可手动唤起 skill |
+
+### 第 2 步：在宿主里跑一审
+
+> **重要**：本 pack 的 agent.md 文件是**宿主级 documentation hint**（F011 ADR-D11-3 既定模式），**不**通过 `garage run <agent>` CLI 运行。宿主（OpenCode / Claude Code）在你发出请求时根据 agent 的 `description:` 自动识别并加载它，用宿主自己的 agent runtime 编排。
+
+#### OpenCode 场景
+
+OpenCode 把 `.opencode/agent/<agent>.md` 注册为可调用 agent。在 OpenCode 会话内：
+
+```text
+# 方式 A：自然语言（最常见）— OpenCode 根据 agent description 自动匹配
+请用 code-audit-reviewer-agent 审查 src/garage_os/runtime/ 模块
+# 或更口语化：
+帮我扫一遍 src/garage_os/runtime/ 看有没有 bug
+```
+
+```text
+# 方式 B：@ 提及显式指名
+@code-audit-reviewer-agent target=src/garage_os/runtime/
+```
+
+```text
+# 方式 C：slash 命令
+/agent code-audit-reviewer-agent
+然后说明你要审查的目标目录
+```
+
+agent 在一次会话内会按 `audit-planner` → `audit-reviewer`（逐模块）顺序工作，把产出落到 `.garage/code-audit/runs/<run-id>/findings/<module>.json`。完成后它会输出一条**移交消息**，指引你**在新会话**启动二审 agent。
+
+#### Claude Code 场景
+
+Claude Code 把 `.claude/agents/<agent>.md` 当 subagent 加载：
+
+```text
+# 方式 A：在主 Claude Code 会话里自然语言唤起
+请用 code-audit-reviewer-agent 审查 src/garage_os/runtime/
+```
+
+```text
+# 方式 B：用 /agents 列出可用 subagent 并选择
+/agents
+# 在列表里选 code-audit-reviewer-agent
+```
+
+行为与 OpenCode 一致：agent 完成后会提示在 fresh context 启动 verifier。
+
+#### Cursor 场景
+
+Cursor 没有 agent surface，所以 `code-audit-*-agent.md` 不会被装到 Cursor。但 4 个 skill（`audit-planner` / `audit-reviewer` / `audit-verifier` / `audit-reporter`）会装到 `.cursor/skills/`，你可以**手动按顺序唤起**：
+
+```text
+# 在 Cursor 对话里依次说：
+请使用 audit-planner skill 切分 src/garage_os/runtime/ 的模块清单
+# 等它产出 plan.json 后：
+请使用 audit-reviewer skill 处理 runtime 模块
+# 一审完成后开新对话（保证 fresh context）：
+请使用 audit-verifier skill 复核 run audit-<id> 的 findings
+请使用 audit-reporter skill 渲染报告
+```
+
+> Cursor 路径需要你手动管理"两个独立 context"——必须显式开新对话来跑 verifier，否则违反 `audit-verifier/references/independence-protocol.md` 的独立性要求。
+
+### 第 3 步：在新会话里跑二审
+
+一审 agent 完成后给你一个 `run-id`（如 `audit-2026-05-16-0935`）。**关闭当前会话**，在 OpenCode / Claude Code 内**新开一个会话**：
+
+```text
+请用 code-audit-verifier-agent 复核 run audit-2026-05-16-0935，输出 html 和 xlsx 报告
+```
+
+或：
+
+```text
+@code-audit-verifier-agent run_id=audit-2026-05-16-0935 formats=html,xlsx
+```
+
+> **为什么要开新会话**：双 agent 设计的核心是 verifier 看不到 reviewer 的"私下推理"，只信任落盘的 finding 字段。同一 context 里跑 verifier 等于让二审看见一审的对话历史，污染独立判断。详见 `skills/audit-verifier/references/independence-protocol.md`。
+
+二审 agent 会跑 `audit-verifier` 复核每条 finding，再 invoke `audit-reporter` 渲染 HTML + Excel 报告。
+
+### 第 4 步：手动渲染报告（如果 agent 没自动跑）
+
+`audit-reporter` skill 背后的实际渲染脚本是两个独立 Python 入口，**任何时候都可以从 shell 直接跑**（agent 也是这么调的）：
+
+```bash
+# HTML 报告（必需）
+uv run python packs/code-audit/skills/audit-reporter/scripts/render_html.py \
+  --workspace . --run-id audit-2026-05-16-0935
+
+# Excel 报告（可选）
+uv run python packs/code-audit/skills/audit-reporter/scripts/render_xlsx.py \
+  --workspace . --run-id audit-2026-05-16-0935
+```
+
+如果你以 user scope 装了 pack，脚本路径在 `~/.opencode/...` / `~/.claude/...`，按宿主表里对应位置查找。
+
+输出：
+
+```
+.garage/code-audit/runs/audit-2026-05-16-0935/reports/
+├── report.html    # 47 KB 左右，CSS/JS 全 inline，浏览器直接打开
+└── report.xlsx    # 4 sheets：Findings / Summary / RunMeta / Rejected
+```
+
+### 端到端示例（OpenCode 场景）
+
+下面是一个完整流程的 user-side 时间线，假设你刚 clone 了一个老项目想做全量 bug 审查：
+
+```text
+$ cd ~/projects/legacy-app
+$ garage init --hosts opencode
+Initialized garage-agent in /Users/me/projects/legacy-app/.garage
+Installed 37 skills, 5 agents into hosts: opencode
+
+# === OpenCode 会话 1（一审） ===
+You: 请用 code-audit-reviewer-agent 审查 src/ 模块的 bug
+Agent: [audit-planner] 切出 7 个模块清单，写到
+       .garage/code-audit/runs/audit-2026-05-16-0935/plan.json
+Agent: [audit-reviewer] 逐模块扫描...
+       module=runtime 完成，写出 12 条 finding 草稿
+       module=knowledge 完成，写出 8 条 finding 草稿
+       ...
+Agent: 一审完成。run_id: audit-2026-05-16-0935
+       - 模块数: 7
+       - finding 草稿数: 47
+       - by_severity: critical=2 high=8 medium=22 low=12 info=3
+
+       下一步请在【新会话】启动 code-audit-verifier-agent 做独立复核：
+       "请用 code-audit-verifier-agent 复核 run audit-2026-05-16-0935，
+        输出 html 和 xlsx 报告"
+
+# === 关闭会话 1，OpenCode 内开新会话 ===
+
+# === OpenCode 会话 2（二审 + 报告） ===
+You: 请用 code-audit-verifier-agent 复核 run audit-2026-05-16-0935，
+     输出 html 和 xlsx 报告
+Agent: [audit-verifier] 独立复核 47 条 finding...
+       module=runtime: 9 confirmed, 1 rejected, 2 downgrade
+       module=knowledge: 7 confirmed, 1 rejected
+       ...
+Agent: [audit-reporter] 渲染 HTML + Excel...
+       reports/report.html (78 KB)
+       reports/report.xlsx (24 KB)
+
+       审查完成。Confirmed: 41 / Rejected: 6
+       打开 .garage/code-audit/runs/audit-2026-05-16-0935/reports/report.html
+
+# === 离开 OpenCode，浏览器看报告 ===
+$ open .garage/code-audit/runs/audit-2026-05-16-0935/reports/report.html
+```
+
+### 常见问题
+
+**Q: 一定要分两个会话跑吗？**
+A: **强烈建议**。同一个会话里跑 verifier 等于让二审看见一审的中间推理，污染独立判断（详见 `independence-protocol.md`）。如果宿主不支持显式 fresh context，至少要让 verifier 在判决时**只引用 finding 字段而非对话历史**，但这是降级方案。
+
+**Q: agent 不认识 `code-audit-reviewer-agent` 怎么办？**
+A: 确认（1）你跑过 `garage init --hosts <你的宿主>`；（2）`.opencode/agent/code-audit-reviewer-agent.md`（或 `.claude/agents/...`）真实存在；（3）宿主在你启动会话后已经重新加载 agent 目录（OpenCode / Claude Code 通常自动；个别情况需要重启会话）。
+
+**Q: 我已经审过一次了，怎么续跑？**
+A: 一审 agent 支持 `resume`：在 OpenCode 里说 "请用 code-audit-reviewer-agent --resume run audit-2026-05-16-0935 继续未完成的模块"。agent 会读 `plan.json` 找 `status=pending` 的模块继续。
+
+**Q: 报告里某条 finding 行号不对，源代码改过了？**
+A: 报告会在卡片顶部显示 `⚠ file changed since audit, line numbers may have shifted`。如果改动很大，开新 run 重审即可。
+
+**Q: 我的项目没有 Python / openpyxl，xlsx 渲染会失败？**
+A: 不会阻断 HTML 渲染。`render_xlsx.py` 默认 lenient 模式，缺 openpyxl 时跳过 xlsx 输出 + 在 stderr 打印提示，HTML 报告照常生成。要硬要求生成 xlsx 时加 `--strict` flag。
 
 ## 边界与不变量
 
