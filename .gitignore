@@ -15,6 +15,13 @@ build/
 .garage/sessions/archived/*/
 !.garage/sessions/active/.gitkeep
 !.garage/sessions/archived/.gitkeep
+
+# code-audit pack run data (per-run plan.json / findings/ / verifications/ /
+# confirmed.json / reports/ / audit-log.jsonl). Each `garage run code-audit-*`
+# invocation lands here; the directory is a work artifact, not source. Mirror
+# the .garage/sessions/ pattern so contributors don't accidentally commit
+# audit outputs.
+.garage/code-audit/runs/*/
 *.key
 *.pem
 .env

@@ -135,9 +135,13 @@ garage run code-audit-verifier-agent  --run-id <id> --formats html,xlsx
 
 ## 实施切片（cycle 计划）
 
-| Slice | 内容 | PR |
+| Slice | 内容 | 状态 |
 |---|---|---|
-| A | pack 骨架（4 skill + 2 agent + pack.json + README）+ dogfood 物化验证 | **本 PR** |
-| B | `audit-reporter/scripts/render_html.py` + 模板 + 单测 | 后续 |
-| C | `render_xlsx.py` + `openpyxl` 依赖 + 单测 | 后续 |
-| D | 端到端 dogfood：审 `src/garage_os/runtime/` 一个模块 + walkthrough | 后续 |
+| A | pack 骨架（4 skill + 2 agent + pack.json + README）+ dogfood 物化验证 | ✅ |
+| B | `audit-reporter/scripts/render_html.py` + 模板 + 单测 | ✅ |
+| C | `render_xlsx.py` + `openpyxl` 依赖 + 单测 | ✅ |
+| D | 端到端 dogfood：审 `src/garage_os/runtime/` + walkthrough；详见 `DOGFOOD-EXAMPLE.md` | ✅ |
+
+## Dogfood 参考结果
+
+见 [`DOGFOOD-EXAMPLE.md`](DOGFOOD-EXAMPLE.md)：用本 pack 实际审了 `src/garage_os/runtime/` 模块（2224 LoC），一审出 8 条 finding 草稿、二审独立复核（7 confirmed + 1 downgrade）、产 HTML + Excel 报告。run files 在 `.gitignore` 中（与 `.garage/sessions/` 同策略），不入 git；artifact 在 PR walkthrough 中。
